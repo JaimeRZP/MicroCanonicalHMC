@@ -24,6 +24,7 @@ mutable struct MCHMCSampler <: AbstractMCMC.AbstractSampler
     tune_eps::Bool
     tune_L::Bool
     tune_sigma::Bool
+    L_tuning_method::String
     hyperparameters::Hyperparameters
     hamiltonian_dynamics::Function
 end
@@ -43,6 +44,7 @@ function MCHMC(nadapt::Int, TEV::Real;
     tune_eps=true,
     tune_L=true,
     tune_sigma=true,
+    L_tuning_method="sigma",
     kwargs...)
 
     ### Init Hyperparameters ###
@@ -57,7 +59,17 @@ function MCHMC(nadapt::Int, TEV::Real;
         println(string("integrator = ", integrator, "is not a valid option."))
     end
 
-    return MCHMCSampler(nadapt, TEV, adaptive, tune_eps, tune_L, tune_sigma, hyperparameters, hamiltonian_dynamics)
+    return MCHMCSampler(
+        nadapt,
+        TEV,
+        adaptive,
+        tune_eps,
+        tune_L,
+        tune_sigma,
+        L_tuning_method,
+        hyperparameters,
+        hamiltonian_dynamics,
+        )
 end
 
 function Random_unit_vector(rng::AbstractRNG, x::AbstractVector{T}; _normalize = true) where {T}
@@ -239,9 +251,11 @@ function Sample(
     n::Int;
     thinning::Int=1,
     init_params = nothing,
+    init_state = nothing,
     file_chunk=10,
     fol_name = ".",
     file_name = "samples",
+    restart = false,
     include_latent = false,
     kwargs...,
 )
@@ -258,13 +272,18 @@ function Sample(
     end
     x_start = target.transform(θ_start)
 
-    transition, state = Step(
-        rng,
-        sampler,
-        target.h,
-        x_start;
-        inv_transform = target.inv_transform,
-        kwargs...)
+    if init_state == nothing
+        transition, state = Step(
+            rng,
+            sampler,
+            target.h,
+            x_start;
+            inv_transform = target.inv_transform,
+            kwargs...)
+    else
+        state = init_state
+        transition = Transition(state, target.inv_transform)
+    end
 
     sample = _make_sample(transition; transform=target.transform, include_latent=include_latent)
     samples = similar(sample, (length(sample), Int(floor(n/thinning))))
@@ -296,5 +315,9 @@ function Sample(
 
     ProgressMeter.finish!(pbar)
 
-    return samples
+    if restart
+        return samples, state
+    else
+        return samples
+    end
 end
